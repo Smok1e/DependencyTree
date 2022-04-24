@@ -10,7 +10,11 @@
 
 //------------------------
 
-bool DumpDependencies (Graph* graph, const char* dllname, const char* parent = nullptr, int indent = 0);
+#define RECURSION_LIMIT 32
+
+//------------------------
+
+bool DumpDependencies (Graph* graph, const char* dllname, const char* parent = nullptr, int recursion = 0);
 
 //------------------------
 
@@ -26,7 +30,7 @@ int main ()
 	graph.add ("edge [color = white, fillcolor = white]");
 	graph.add ("");
 
-	DumpDependencies (&graph, "C:\\Program Files (x86)\\Far Manager\\Far.exe");
+	DumpDependencies (&graph, "notepad.exe");
 
 	int result = graph.render ();
 	if (result == 0)
@@ -41,11 +45,28 @@ int main ()
 
 //------------------------
 
-bool DumpDependencies (Graph* graph, const char* dllname, const char* parent /*= nullptr*/, int indent /*= 0*/)
+bool DumpDependencies (Graph* graph, const char* dllname, const char* parent /*= nullptr*/, int recursion /*= 0*/)
 {
+	if (recursion >= RECURSION_LIMIT)
+	{
+		printf ("Warning: Recursion calls limit exceeded (%d)\n", recursion);
+		return false;
+	}
+
+	if (parent && (dllname == parent || strcmp (dllname, parent) == 0))
+	{
+		graph -> add ("\"%s\" [style = filled, fillcolor = \"#464513\", label = \"%s\"];", dllname, dllname);
+		graph -> add ("\"%s\" -> \"%s\" [color = \"#FFFF00\", fillcolor = \"#FFFF00\"];", dllname, parent);
+		return false;
+	}
+
 	HMODULE module = LoadLibraryA (dllname);
 	if (!module)
 	{
+		graph -> add ("\"%s\" [style = filled, fillcolor = \"#5E1B1B\", label = \"%s\"];", dllname, dllname);
+		if (parent)
+			graph -> add ("\"%s\" -> \"%s\" [color = \"#5e1b1b\", fillcolor = \"#FF0000\"];", parent, dllname);
+
 		printf ("Warning: Failed to load library '%s': %s\n", dllname, FormatWinapiError (GetLastError ()));
 		return true;
 	}
@@ -59,25 +80,18 @@ bool DumpDependencies (Graph* graph, const char* dllname, const char* parent /*=
 		return false;
 	}
 
-	const char* name = info.getOriginalModuleName ();
-	if 
-	(
-		_stricmp (name, "NTDLL.DLL"     ) == 0 || // эти дллки по какой то причине образуют кольцевую связь и как следствие переполнение стека
-		_stricmp (name, "KERNELBASE.DLL") == 0 ||
-		_stricmp (name, "KERNEL32.DLL"  ) == 0 ||
-		_stricmp (name, "UCRTBASE.dll"  ) == 0 ||
-		_stricmp (name, "MSVCP_WIN.dll" ) == 0 ||
-		_stricmp (name, "GDI32FULL.dll" ) == 0
-	)
+	if (parent)
+		graph -> add ("\"%s\" -> \"%s\"", parent, dllname);
+
+	else graph -> add ("\"%s\" [style = filled, fillcolor = \"#12304D\"]", dllname);
+
+	if (_stricmp (dllname, "NTDLL.DLL") == 0)
 	{
+		graph -> add ("\"%s\" [style = filled, fillcolor = \"#13463C\"]", dllname);
+
 		FreeLibrary (module);
 		return true;
 	}
-
-	if (parent)
-		graph -> add ("\"%s\" -> \"%s\"", parent, name);
-
-	//printf ("%*s'%s':\n", indent*2, "", info.getOriginalModuleName ());
 
 	int count = info.getImportModulesCount ();
 	for (size_t i = 0; i < count; i++)
@@ -91,7 +105,7 @@ bool DumpDependencies (Graph* graph, const char* dllname, const char* parent /*=
 			}
 		}
 
-		if (!DumpDependencies (graph, info.getImportModuleName (i), dllname, indent+1))
+		if (!DumpDependencies (graph, info.getImportModuleName (i), dllname, recursion+1))
 		{
 			FreeLibrary (module);
 			return false;
